@@ -1,10 +1,11 @@
 import 'dart:io';
-import 'dart:async'; // مكتبة لتشغيل مؤقت
-
+import 'dart:async';
 import 'package:another_audio_recorder/another_audio_recorder.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:voice_and_video_task/views/video_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,12 +15,26 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  Recording? _recording;
+  bool _isRecording = false;
+  AnotherAudioRecorder? _audioRecorder;
+  final bool _isPaused = false;
+  AudioPlayer? _audioPlayer;
+  Duration _currentPosition = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+  Timer? _timer;
+  final List<File> _recordings = [];
+  int _recordingCount = 0;
+  bool _isPlaying = false; // حالة التشغيل
+  bool _isPlaybackPaused = false; // حالة الإيقاف المؤقت للتشغيل
+  File? _currentFile; // الملف الذي يتم تشغيله حاليًا
+
   @override
   void initState() {
     super.initState();
     _requestPermission();
     _prepareRecorder();
-    _audioPlayer = AudioPlayer(); // تهيئة مشغل الصوت
+    _audioPlayer = AudioPlayer();
     _audioPlayer!.onDurationChanged.listen((Duration duration) {
       setState(() {
         _totalDuration = duration;
@@ -31,35 +46,31 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentPosition = position;
       });
     });
+
+    _audioPlayer!.onPlayerComplete.listen((event) {
+      setState(() {
+        _isPlaying = false;
+        _currentPosition = Duration.zero;
+      });
+    });
   }
 
-  Recording? _recording;
-  bool _isRecording = false;
-  AnotherAudioRecorder? _audioRecorder;
-  bool _isPaused = false;
-  AudioPlayer? _audioPlayer; // مشغل الصوت
-  Duration _currentPosition = Duration.zero; // لعرض التقدم
-  Duration _totalDuration = Duration.zero; // مدة التسجيل أو التشغيل
-  Timer? _timer;
-
-// تاني حاجه بتأكد من اذون الميكروفون
   Future<void> _prepareRecorder() async {
     bool hasPermission = await AnotherAudioRecorder.hasPermissions;
     if (!hasPermission) {
-      print('no microphone permission');
+      print('No microphone permission');
       return;
     }
-    // بحدد مسار التسجيل
-    Directory appDirectory = await Directory.systemTemp.createTemp();
-    String path = '${appDirectory.path}/audio_recording.aac';
-
-    // تهيئة المسجل نفسه
+    Directory appDirectory = await getApplicationDocumentsDirectory();
+    String path =
+        '${appDirectory.path}/audio_recording_${_recordingCount + 1}.aac';
     _audioRecorder = AnotherAudioRecorder(path, audioFormat: AudioFormat.WAV);
   }
 
   Future<void> _startRecording() async {
     if (_audioRecorder != null && !_isRecording) {
       await _audioRecorder!.start();
+      _startTimer();
       setState(() {
         _isRecording = true;
       });
@@ -71,61 +82,78 @@ class _HomeScreenState extends State<HomeScreen> {
       Recording? recording = await _audioRecorder!.stop();
       _stopTimer();
 
+      File recordingFile = File(recording!.path!);
       setState(() {
+        _recordingCount++;
         _isRecording = false;
-        _recording = recording;
+        _recordings.add(recordingFile);
       });
-      print('Recording saved at: ${_recording!.path}');
+
+      print('Recording saved at: ${recording.path}');
     }
   }
 
-  Future<void> _pauseRecording() async {
-    if (_audioRecorder != null && _isRecording && !_isPaused) {
-      await _audioRecorder!.pause();
-      _stopTimer();
-
+  Future<void> _playRecording(File file, int index) async {
+    // إيقاف المقطع الحالي إذا كان يعمل
+    if (_isPlaying && _currentFile != file) {
+      await _audioPlayer!.stop();
       setState(() {
-        _isPaused = true;
+        _isPlaying = false;
+        _currentPosition = Duration.zero;
       });
     }
-  }
 
-  Future<void> _resumeRecording() async {
-    if (_audioRecorder != null && _isPaused) {
-      await _audioRecorder!.resume();
-      _startTimer();
-
+    // تشغيل المقطع الجديد
+    if (!_isPlaying || _isPlaybackPaused || _currentFile != file) {
+      await _audioPlayer!.play(DeviceFileSource(file.path));
       setState(() {
-        _isPaused = false;
+        _isPlaying = true;
+        _isPlaybackPaused = false;
+        _currentFile = file; // تعيين الملف الحالي الذي يتم تشغيله
       });
-    }
-  }
-
-  Future<void> _playRecording() async {
-    if (_recording != null && _recording!.path != null) {
-      await _audioPlayer!.play(DeviceFileSource(_recording!.path!));
-    }
-  }
-
-// اول حاجه اشوف اهاندل الاذونات
-  Future<void> _requestPermission() async {
-    var status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) {
-      print('Microphone Permission denied');
-    }
-
-    var storageStatus = await Permission.storage.request();
-    if (status != PermissionStatus.granted) {
-      print('Storage Permission denied');
     }
   }
 
   Future<void> _pausePlayback() async {
-    await _audioPlayer!.pause();
+    if (_isPlaying) {
+      await _audioPlayer!.pause();
+      setState(() {
+        _isPlaybackPaused = true;
+        _isPlaying = false; // إيقاف حالة التشغيل ولكن إبقاء شريط التقدم
+      });
+    }
   }
 
   Future<void> _resumePlayback() async {
-    await _audioPlayer!.resume();
+    if (_isPlaybackPaused) {
+      await _audioPlayer!.resume();
+      setState(() {
+        _isPlaying = true;
+        _isPlaybackPaused = false;
+      });
+    }
+  }
+
+  Future<void> _deleteRecording(int index) async {
+    // الحصول على الملف بناءً على الفهرس
+    File file = _recordings[index];
+
+    // التحقق إذا كان الملف موجودًا
+    if (await file.exists()) {
+      await file.delete(); // حذف الملف
+
+      setState(() {
+        // إزالة الملف من القائمة
+        _recordings.removeAt(index);
+        // إذا تم حذف الملف الذي يتم تشغيله حاليًا
+        if (_currentFile == file) {
+          _currentFile = null; // إعادة تعيين الملف الحالي
+          _isPlaying = false; // إيقاف التشغيل
+          _isPlaybackPaused = false; // إيقاف الإيقاف المؤقت
+          _currentPosition = Duration.zero; // إعادة تعيين مدة التقدم
+        }
+      });
+    }
   }
 
   void _startTimer() {
@@ -140,11 +168,22 @@ class _HomeScreenState extends State<HomeScreen> {
     _timer?.cancel();
   }
 
+  Future<void> _requestPermission() async {
+    var status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      print('Microphone Permission denied');
+    }
+
+    var storageStatus = await Permission.storage.request();
+    if (storageStatus != PermissionStatus.granted) {
+      print('Storage Permission denied');
+    }
+  }
+
   @override
   void dispose() {
-    _audioPlayer?.dispose(); // تحرير مشغل الصوت عند التخلص من الشاشة
-    _stopTimer(); // تحرير المؤقت
-
+    _audioPlayer?.dispose();
+    _stopTimer();
     super.dispose();
   }
 
@@ -152,52 +191,86 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        actions: [
+          IconButton(
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (context) {
+                    return VideoPlayerScreen();
+                  },
+                ));
+              },
+              icon: Icon(Icons.video_call))
+        ],
         title: const Text('Audio Recorder'),
+        backgroundColor: Colors.deepPurpleAccent,
       ),
-      body: Center(
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(_isRecording
-                ? (_isPaused ? 'Paused...' : 'Recording...')
-                : 'Press to Record'),
-            ElevatedButton(
+            if (_isRecording)
+              Text(
+                "${_currentPosition.inMinutes}:${_currentPosition.inSeconds.remainder(60).toString().padLeft(2, '0')}",
+                style:
+                    const TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
+              ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
               onPressed: _isRecording ? _stopRecording : _startRecording,
-              child: Text(_isRecording ? 'Stop Recording' : 'Start Recording'),
+              icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+              label: Text(_isRecording ? 'Stop Recording' : 'Start Recording'),
+              style: ElevatedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                backgroundColor: _isRecording ? Colors.red : Colors.green,
+              ),
             ),
-            if (_isRecording && !_isPaused)
-              ElevatedButton(
-                onPressed: _pauseRecording,
-                child: const Text('Pause Recording'),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _recordings.length,
+                itemBuilder: (context, index) {
+                  File file = _recordings[index];
+                  return ListTile(
+                    title: Text('Recording ${index + 1}'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteRecording(
+                          index), // تمرير الفهرس الصحيح لحذف التسجيل
+                    ),
+                    subtitle: _currentFile == file
+                        ? Column(
+                            children: [
+                              Slider(
+                                value: _currentPosition.inSeconds.toDouble(),
+                                max: _totalDuration.inSeconds.toDouble(),
+                                onChanged: (value) async {
+                                  await _audioPlayer!
+                                      .seek(Duration(seconds: value.toInt()));
+                                },
+                              ),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.pause),
+                                    onPressed: _pausePlayback,
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.play_arrow),
+                                    onPressed: _resumePlayback,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          )
+                        : null, // عرض شريط التقدم فقط للمقطع الحالي
+                    onTap: () =>
+                        _playRecording(file, index), // تمرير الفهرس الصحيح
+                  );
+                },
               ),
-            if (_isPaused)
-              ElevatedButton(
-                onPressed: _resumeRecording,
-                child: const Text('Resume Recording'),
-              ),
-            if (_recording != null)
-              Column(
-                children: [
-                  Text('Recording saved at: ${_recording!.path}'),
-                  Slider(
-                    value: _currentPosition.inSeconds.toDouble(),
-                    max: _totalDuration.inSeconds.toDouble(),
-                    onChanged: (value) {},
-                  ),
-                  ElevatedButton(
-                    onPressed: _playRecording, // زر لتشغيل التسجيل
-                    child: const Text('Play Recording'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _pausePlayback, // زر لإيقاف التشغيل مؤقتًا
-                    child: const Text('Pause Playback'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _resumePlayback, // زر لاستئناف التشغيل
-                    child: const Text('Resume Playback'),
-                  ),
-                ],
-              ),
+            ),
           ],
         ),
       ),
