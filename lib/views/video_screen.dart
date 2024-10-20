@@ -23,13 +23,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     _controller = VideoPlayerController.file(videoFile)
       ..initialize().then((_) {
         setState(() {});
-        _controller!.play(); // يمكننا تشغيل الفيديو تلقائيًا بعد التحميل
+        _controller!.play(); 
       });
   }
 
   @override
   void dispose() {
-    _controller?.dispose(); // تحرير مشغل الفيديو عند التخلص من الشاشة
+    _controller?.dispose(); 
     super.dispose();
   }
 
@@ -59,10 +59,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               if (_controller != null && _controller!.value.isInitialized)
                 Column(
                   children: [
-                    // ضبط حجم مشغل الفيديو
                     SizedBox(
-                      width: 300, // عرض المشغل
-                      height: 200, // ارتفاع المشغل
+                      width: 300, 
+                      height: 200, 
                       child: VideoPlayer(_controller!),
                     ),
                     const SizedBox(height: 16),
@@ -91,7 +90,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                             setState(() {
                               _controller!.pause();
                               _controller!
-                                  .seekTo(Duration.zero); // إعادة تشغيل الفيديو
+                                  .seekTo(Duration.zero); 
                             });
                           },
                         ),

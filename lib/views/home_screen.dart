@@ -25,9 +25,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _timer;
   final List<File> _recordings = [];
   int _recordingCount = 0;
-  bool _isPlaying = false; // حالة التشغيل
-  bool _isPlaybackPaused = false; // حالة الإيقاف المؤقت للتشغيل
-  File? _currentFile; // الملف الذي يتم تشغيله حاليًا
+  bool _isPlaying = false;
+  bool _isPlaybackPaused = false;
+  File? _currentFile;
 
   @override
   void initState() {
@@ -109,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isPlaying = true;
         _isPlaybackPaused = false;
-        _currentFile = file; // تعيين الملف الحالي الذي يتم تشغيله
+        _currentFile = file;
       });
     }
   }
@@ -119,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await _audioPlayer!.pause();
       setState(() {
         _isPlaybackPaused = true;
-        _isPlaying = false; // إيقاف حالة التشغيل ولكن إبقاء شريط التقدم
+        _isPlaying = false;
       });
     }
   }
@@ -135,22 +135,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _deleteRecording(int index) async {
-    // الحصول على الملف بناءً على الفهرس
     File file = _recordings[index];
 
-    // التحقق إذا كان الملف موجودًا
     if (await file.exists()) {
-      await file.delete(); // حذف الملف
+      await file.delete();
 
       setState(() {
-        // إزالة الملف من القائمة
         _recordings.removeAt(index);
-        // إذا تم حذف الملف الذي يتم تشغيله حاليًا
         if (_currentFile == file) {
-          _currentFile = null; // إعادة تعيين الملف الحالي
-          _isPlaying = false; // إيقاف التشغيل
-          _isPlaybackPaused = false; // إيقاف الإيقاف المؤقت
-          _currentPosition = Duration.zero; // إعادة تعيين مدة التقدم
+          _currentFile = null;
+          _isPlaying = false;
+          _isPlaybackPaused = false;
+          _currentPosition = Duration.zero;
         }
       });
     }
@@ -236,8 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: Text('Recording ${index + 1}'),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _deleteRecording(
-                          index), // تمرير الفهرس الصحيح لحذف التسجيل
+                      onPressed: () => _deleteRecording(index),
                     ),
                     subtitle: _currentFile == file
                         ? Column(
@@ -264,9 +259,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           )
-                        : null, // عرض شريط التقدم فقط للمقطع الحالي
-                    onTap: () =>
-                        _playRecording(file, index), // تمرير الفهرس الصحيح
+                        : null,
+                    onTap: () => _playRecording(file, index),
                   );
                 },
               ),
